@@ -19,9 +19,24 @@ export function createRoom(ownerName, ownerSocketId) {
   };
   return rooms[roomId];
 }
+export function sendPlayerList(io, room, targetSocket = null) {
+    const payload = {
+        players: room.players,
+        ownerId: room.ownerId
+    };
+    if (targetSocket) {
+        targetSocket.emit("player-list", payload);
+    } else {
+        io.to(room.id).emit("player-list", payload);
+    }
+}
 
 export function getRoom(roomId) {
   return rooms[roomId] || null;
+}
+
+export function getAllRooms() {
+  return rooms;
 }
 
 export function joinRoom(roomId, playerName, socketId) {

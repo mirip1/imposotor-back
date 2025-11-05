@@ -7,7 +7,8 @@ import {
     resetVotes,
     activePlayers,
     eliminatePlayer,
-    defaultWords
+    defaultWords,
+    getAllRooms
 } from "../game/rooms.js";
 
 /**
@@ -23,14 +24,21 @@ export function initGameSocket(io) {
     io.on("connection", (socket) => {
         console.log("Jugador conectado:", socket.id);
 
-        socket.on("create-room", (playerName) => {
-            const room = createRoom(playerName || "Anónimo", socket.id);
-            socket.join(room.id);
-            socket.emit("room-created", { roomId: room.id });
-            io.to(room.id).emit("player-list", room.players);
-            console.log(`Sala creada: ${room.id} por ${playerName}`);
-        });
+        socket.on("create-room", ({ name }, callback) => {
+            try {
+                const room = createRoom(name, socket.id);
 
+                socket.join(room.id);
+                console.log(`Sala creada: ${room.id} por ${JSON.stringify(name)}`);
+
+                if (callback) callback({ success: true, roomId: room.id });
+
+                io.to(room.id).emit("player-list", room.players);
+            } catch (error) {
+                console.error("Error al crear sala:", error);
+                if (callback) callback({ success: false });
+            }
+        });
         socket.on("join-room", ({ roomId, playerName }) => {
             const room = getRoom(roomId);
             if (!room) {
@@ -41,10 +49,19 @@ export function initGameSocket(io) {
             socket.join(roomId);
             io.to(roomId).emit("player-list", room.players);
             console.log(`${playerName} se unió a ${roomId}`);
+            console.log(room.players)
         });
 
-        socket.on("start-round", (roomId) => {
+        socket.on("player-list-room", ({ roomId }) => {
             const room = getRoom(roomId);
+            if (!room) {
+                socket.emit("error", { message: "Sala no existe" });
+                return;
+            }
+            // Emitimos solo al socket que pidió la lista
+            socket.emit("player-list", room.players);
+        });
+        socket.on("start-round", (roomId) => {
             if (!room) {
                 socket.emit("error", "Sala no encontrada");
                 return;
@@ -179,36 +196,24 @@ export function initGameSocket(io) {
         });
 
         socket.on("disconnect", () => {
-            for (const roomId in rooms) {
-                const room = rooms[roomId];
-                const exists = room.players.find((p) => p.id === socket.id);
+            console.log(`Jugador desconectado: ${socket.id}`);
 
-                if (exists) {
-                    // Eliminar jugador de la sala
-                    room.players = room.players.filter((p) => p.id !== socket.id);
+            // Usamos leaveRoom de nuestro módulo para eliminar al jugador de todas las salas
+            // Sin acceder directamente a "rooms" (que está encapsulado en el módulo).
+            for (const [roomId, room] of Object.entries(getAllRooms())) {
+                const playerExists = room.players.find((p) => p.id === socket.id);
+                if (playerExists) {
+                    leaveRoom(roomId, socket.id);
 
-                    // Si era el creador, reasignar propietario
-                    if (room.ownerId === socket.id && room.players.length > 0) {
-                        room.ownerId = room.players[0].id;
-                        io.to(roomId).emit("owner-changed", {
-                            newOwnerId: room.ownerId,
-                            newOwnerName: room.players[0].name,
-                        });
+                    // Si quedan jugadores, actualizamos la lista en el front
+                    const updatedRoom = getRoom(roomId);
+                    if (updatedRoom) {
+                        io.to(roomId).emit("player-list", updatedRoom.players);
                     }
-
-                    // Si la sala queda vacía, eliminarla completamente
-                    if (room.players.length === 0) {
-                        delete rooms[roomId];
-                        console.log(`🗑️ Sala ${roomId} eliminada (vacía)`);
-                    } else {
-                        io.to(roomId).emit("player-list", room.players);
-                    }
+                    console.log(`${socket.id} salió de la sala ${roomId}`);
                 }
             }
-
-            console.log("Jugador desconectado:", socket.id);
         });
-
         // Manejo explícito de "leave-room" desde cliente
         socket.on("leave-room", ({ roomId }) => {
             const room = getRoom(roomId);
