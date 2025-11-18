@@ -8,7 +8,7 @@ import {
     activePlayers,
     eliminatePlayer,
     defaultWords,
-    getAllRooms
+    getAllRooms,
 } from "../game/rooms.js";
 
 /**
@@ -29,27 +29,38 @@ export function initGameSocket(io) {
                 const room = createRoom(name, socket.id);
 
                 socket.join(room.id);
-                console.log(`Sala creada: ${room.id} por ${JSON.stringify(name)}`);
+                console.log(`Sala creada: ${room.id} por ${name} (${socket.id})`);
 
                 if (callback) callback({ success: true, roomId: room.id });
 
-                io.to(room.id).emit("player-list", room.players);
+                io.to(room.id).emit("player-list", {
+                    players: room.players,
+                    ownerId: room.ownerId
+                });
             } catch (error) {
                 console.error("Error al crear sala:", error);
                 if (callback) callback({ success: false });
             }
         });
-        socket.on("join-room", ({ roomId, playerName }) => {
+        socket.on("join-room", ({ roomId, playerName }, callback) => {
             const room = getRoom(roomId);
             if (!room) {
-                socket.emit("error", { message: "Sala no existe" });
+                if (callback) callback({ success: false, message: "Sala no existe" });
                 return;
             }
+
             joinRoom(roomId, playerName || "Anónimo", socket.id);
             socket.join(roomId);
-            io.to(roomId).emit("player-list", room.players);
+
             console.log(`${playerName} se unió a ${roomId}`);
-            console.log(room.players)
+            console.log(room.players);
+
+            io.to(roomId).emit("player-list", {
+                players: room.players,
+                ownerId: room.ownerId
+            });
+
+            if (callback) callback({ success: true });
         });
 
         socket.on("player-list-room", ({ roomId }) => {
@@ -59,9 +70,13 @@ export function initGameSocket(io) {
                 return;
             }
             // Emitimos solo al socket que pidió la lista
-            socket.emit("player-list", room.players);
+            socket.emit("player-list", {
+                players: room.players,
+                ownerId: room.ownerId
+            });
         });
         socket.on("start-round", (roomId) => {
+            const room = getRoom(roomId);
             if (!room) {
                 socket.emit("error", "Sala no encontrada");
                 return;
@@ -91,7 +106,10 @@ export function initGameSocket(io) {
                 playersCount: result.room.players.length,
                 activeCount: activePlayers(roomId).length
             });
-            io.to(roomId).emit("player-list", result.room.players);
+            io.to(roomId).emit("player-list", {
+                players: result.room.players,
+                ownerId: result.room.ownerId
+            });
             console.log(`Ronda iniciada en ${roomId} - palabra elegida (secreta).`);
         });
 
@@ -191,7 +209,10 @@ export function initGameSocket(io) {
                 playersCount: result.room.players.length,
                 activeCount: activePlayers(roomId).length
             });
-            io.to(roomId).emit("player-list", result.room.players);
+            io.to(roomId).emit("player-list", {
+                players: result.room.players,
+                ownerId: result.room.ownerId
+            });
             console.log(`Owner ${socket.id} avanzó la ronda en ${roomId}`);
         });
 
@@ -208,7 +229,10 @@ export function initGameSocket(io) {
                     // Si quedan jugadores, actualizamos la lista en el front
                     const updatedRoom = getRoom(roomId);
                     if (updatedRoom) {
-                        io.to(roomId).emit("player-list", updatedRoom.players);
+                        io.to(roomId).emit("player-list", {
+                            players: updatedRoom.players,
+                            ownerId: updatedRoom.ownerId
+                        });
                     }
                     console.log(`${socket.id} salió de la sala ${roomId}`);
                 }
@@ -223,7 +247,10 @@ export function initGameSocket(io) {
 
             const updatedRoom = getRoom(roomId);
             if (updatedRoom) {
-                io.to(roomId).emit("player-list", updatedRoom.players);
+                io.to(roomId).emit("player-list", {
+                    players: updatedRoom.players,
+                    ownerId: updatedRoom.ownerId
+                });
             } else {
                 console.log(`sala ${roomId} eliminada (sin jugadores)`);
             }
