@@ -144,9 +144,10 @@ export function initGameSocket(io) {
                 io.to(roomId).emit("vote-result", {
                     eliminated: null,
                     reason: "Todos se abstuvieron",
-                    votes: room.votes
+                    votes: room.votes,
+                    gameOver: false
                 });
-                // limpiar votos pero permitir nueva votación si quedan suficientes jugadores
+                // limpiar votos pero permitir nueva votación
                 resetVotes(roomId);
                 return;
             }
@@ -160,38 +161,65 @@ export function initGameSocket(io) {
 
             const wasImpostor = (room.impostorId === chosenTargetId);
 
+            // Verificar condiciones de fin de partida
+            const remaining = activePlayers(roomId);
+            let gameOver = false;
+            let gameOverReason = null;
+
+            if (wasImpostor) {
+                // ¡Encontraron al impostor! - Victoria de los jugadores
+                gameOver = true;
+                gameOverReason = "impostor_found";
+                room.roundActive = false;
+            } else if (remaining.length <= 2) {
+                // Quedan 2 o menos jugadores - Victoria del impostor
+                gameOver = true;
+                gameOverReason = "impostor_wins";
+                room.roundActive = false;
+            }
+
             // Emitir resultado de la votación
             io.to(roomId).emit("vote-result", {
                 eliminated: eliminatedPlayer ? { id: eliminatedPlayer.id, name: eliminatedPlayer.name } : null,
                 wasImpostor,
-                votes: room.votes
+                votes: room.votes,
+                gameOver,
+                gameOverReason
             });
 
             // Actualizar lista pública
-            io.to(roomId).emit("player-list", room.players);
+            io.to(roomId).emit("player-list", {
+                players: room.players,
+                ownerId: room.ownerId
+            });
 
-            // Limpiar votos para permitir nueva votación entre los que quedan (si hay >1 jugador activo)
+            // Limpiar votos para permitir nueva votación
             resetVotes(roomId);
 
-            // Si solo queda 0 o 1 jugadores activos, ya no se puede seguir votando automáticamente
-            const remaining = activePlayers(roomId);
-            if (remaining.length <= 1) {
-                room.roundActive = false;
-                io.to(roomId).emit("round-info", { roundActive: false, message: "No quedan suficientes jugadores para seguir votando" });
+            // Si el juego no terminó, notificar que pueden seguir votando
+            if (!gameOver) {
+                io.to(roomId).emit("round-info", {
+                    roundActive: true,
+                    message: "Continúa la votación",
+                    activeCount: remaining.length
+                });
             } else {
-                // Se permite seguir votando: notificar a los clientes que comienzan nueva ronda de votación
-                io.to(roomId).emit("vote-next", { activeCount: remaining.length });
+                io.to(roomId).emit("round-info", {
+                    roundActive: false,
+                    gameOver: true,
+                    gameOverReason
+                });
             }
         });
 
-        // Owner finaliza la ronda y avanza a la siguiente (start-round automático)
-        socket.on("end-round", (roomId) => {
+        // Owner inicia una nueva partida completa (nueva palabra, nuevo impostor)
+        socket.on("new-game", (roomId) => {
             const room = getRoom(roomId);
             if (!room) return socket.emit("error", "Sala no encontrada");
-            if (room.ownerId !== socket.id) return socket.emit("error", "Solo el owner puede terminar la ronda");
-            if (room.players.length < 2) return socket.emit("error", "Se necesitan al menos 2 jugadores para iniciar una ronda");
+            if (room.ownerId !== socket.id) return socket.emit("error", "Solo el owner puede iniciar una nueva partida");
+            if (room.players.length < 2) return socket.emit("error", "Se necesitan al menos 2 jugadores para iniciar una partida");
 
-            // Iniciamos nueva ronda
+            // Iniciamos nueva partida (resetea eliminaciones, elige nueva palabra e impostor)
             const result = startRound(roomId, defaultWords);
 
             // Envío individual
@@ -213,7 +241,7 @@ export function initGameSocket(io) {
                 players: result.room.players,
                 ownerId: result.room.ownerId
             });
-            console.log(`Owner ${socket.id} avanzó la ronda en ${roomId}`);
+            console.log(`Owner ${socket.id} inició nueva partida en ${roomId}`);
         });
 
         socket.on("disconnect", () => {
