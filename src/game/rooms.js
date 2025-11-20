@@ -1,6 +1,6 @@
 export const rooms = {};
 export const defaultWords = [
-  "gato","perro","avión","pizza","playa","fútbol","montaña","cine","sol","ordenador"
+  "Malena Bujarra", "Paponazo", "Mario", "Putero", "Serranito"
 ];
 
 // Crea sala y marca owner
@@ -14,21 +14,21 @@ export function createRoom(ownerName, ownerSocketId) {
     ],
     word: null,
     impostorId: null,
-    votes: {}, 
+    votes: {},
     roundActive: false
   };
   return rooms[roomId];
 }
 export function sendPlayerList(io, room, targetSocket = null) {
-    const payload = {
-        players: room.players,
-        ownerId: room.ownerId
-    };
-    if (targetSocket) {
-        targetSocket.emit("player-list", payload);
-    } else {
-        io.to(room.id).emit("player-list", payload);
-    }
+  const payload = {
+    players: room.players,
+    ownerId: room.ownerId
+  };
+  if (targetSocket) {
+    targetSocket.emit("player-list", payload);
+  } else {
+    io.to(room.id).emit("player-list", payload);
+  }
 }
 
 export function getRoom(roomId) {
